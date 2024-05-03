@@ -47,6 +47,8 @@
 #include <std_srvs/Empty.h>
 #include <tf/transform_broadcaster.h>
 #include <visualization_msgs/Marker.h>
+#include <nav_msgs/Path.h> // Include the header for Path message
+#include <geometry_msgs/PoseStamped.h> // Include the header for PoseStamped message
 
 #include <rovio/SrvResetToPose.h>
 #include "rovio/RovioFilter.hpp"
@@ -123,6 +125,7 @@ class RovioNode{
   bool forceMarkersPublishing_;
   bool forcePatchPublishing_;
   bool gotFirstMessages_;
+  bool forcePathPublishing_;
   std::mutex m_filter_;
 
   // Nodes, Subscriber, Publishers
@@ -146,6 +149,7 @@ class RovioNode{
   ros::Publisher pubMarkers_;          /**<Publisher: Ros line marker, indicating the depth uncertainty of a landmark.*/
   ros::Publisher pubExtrinsics_[mtState::nCam_];
   ros::Publisher pubImuBias_;
+  ros::Publisher pubPath_;
 
   // Ros Messages
   geometry_msgs::TransformStamped transformMsg_;
@@ -157,6 +161,7 @@ class RovioNode{
   sensor_msgs::PointCloud2 patchMsg_;
   visualization_msgs::Marker markerMsg_;
   sensor_msgs::Imu imuBiasMsg_;
+  nav_msgs::Path pathMsg_;
   int msgSeq_;
 
   // Rovio outputs and coordinate transformations
@@ -203,6 +208,7 @@ class RovioNode{
     forceMarkersPublishing_ = false;
     forcePatchPublishing_ = false;
     gotFirstMessages_ = false;
+    forcePathPublishing_ = false;
 
     // Subscribe topics
     subImu_ = nh_.subscribe("imu0", 1000, &RovioNode::imuCallback,this);
@@ -223,6 +229,7 @@ class RovioNode{
     pubPcl_ = nh_.advertise<sensor_msgs::PointCloud2>("rovio/pcl", 1);
     pubPatch_ = nh_.advertise<sensor_msgs::PointCloud2>("rovio/patch", 1);
     pubMarkers_ = nh_.advertise<visualization_msgs::Marker>("rovio/markers", 1 );
+    pubPath_ = nh_.advertise<nav_msgs::Path>("rovio/path", 1);
 
     pub_T_J_W_transform = nh_.advertise<geometry_msgs::TransformStamped>("rovio/T_G_W", 1);
     for(int camID=0;camID<mtState::nCam_;camID++){
@@ -231,10 +238,10 @@ class RovioNode{
     pubImuBias_ = nh_.advertise<sensor_msgs::Imu>("rovio/imu_biases", 1 );
 
     // Handle coordinate frame naming
-    map_frame_ = "/map";
-    world_frame_ = "/world";
-    camera_frame_ = "/camera";
-    imu_frame_ = "/imu";
+    map_frame_ = "map";
+    world_frame_ = "world";
+    camera_frame_ = "camera";
+    imu_frame_ = "imu";
     nh_private_.param("map_frame", map_frame_, map_frame_);
     nh_private_.param("world_frame", world_frame_, world_frame_);
     nh_private_.param("camera_frame", camera_frame_, camera_frame_);
@@ -249,6 +256,9 @@ class RovioNode{
 
     odometryMsg_.header.frame_id = world_frame_;
     odometryMsg_.child_frame_id = imu_frame_;
+
+    pathMsg_.header.frame_id = world_frame_;
+
     msgSeq_ = 1;
     for(int camID=0;camID<mtState::nCam_;camID++){
       extrinsicsMsg_[camID].header.frame_id = imu_frame_;
@@ -664,7 +674,7 @@ class RovioNode{
 
         // Obtain the save filter state.
         mtFilterState& filterState = mpFilter_->safe_;
-	mtState& state = mpFilter_->safe_.state_;
+	      mtState& state = mpFilter_->safe_.state_;
         state.updateMultiCameraExtrinsics(&mpFilter_->multiCamera_);
         MXD& cov = mpFilter_->safe_.cov_;
         imuOutputCT_.transformState(state,imuOutput_);
@@ -755,6 +765,31 @@ class RovioNode{
             }
           }
           pubOdometry_.publish(odometryMsg_);
+        }
+
+        // Publish Path
+        if(pubPath_.getNumSubscribers() > 0 || forcePathPublishing_){
+          // Create a PoseStamped message
+          geometry_msgs::PoseStamped poseStamped;
+          poseStamped.header.seq = msgSeq_;
+          poseStamped.header.stamp = ros::Time(mpFilter_->safe_.t_);
+          poseStamped.header.frame_id = world_frame_; // Set the frame id according to your odometry frame
+
+          // Set the position in PoseStamped message
+          poseStamped.pose.position.x = imuOutput_.WrWB()(0);
+          poseStamped.pose.position.y = imuOutput_.WrWB()(1);
+          poseStamped.pose.position.z = imuOutput_.WrWB()(2);
+
+          // Set the orientation in PoseStamped message
+          poseStamped.pose.orientation.w = -imuOutput_.qBW().w();
+          poseStamped.pose.orientation.x = imuOutput_.qBW().x();
+          poseStamped.pose.orientation.y = imuOutput_.qBW().y();
+          poseStamped.pose.orientation.z = imuOutput_.qBW().z();
+
+          // Add the pose to the Path message
+          pathMsg_.header.stamp = ros::Time(mpFilter_->safe_.t_);
+          pathMsg_.poses.push_back(poseStamped);
+          pubPath_.publish(pathMsg_);
         }
 
         if(pubPoseWithCovStamped_.getNumSubscribers() > 0 || forcePoseWithCovariancePublishing_){
