@@ -150,6 +150,8 @@ class RovioNode{
   ros::Publisher pubExtrinsics_[mtState::nCam_];
   ros::Publisher pubImuBias_;
   ros::Publisher pubPath_;
+  ros::Publisher pubTrackImg0_; // for cam0
+  ros::Publisher pubTrackImg1_; // for cam1
 
   // Ros Messages
   geometry_msgs::TransformStamped transformMsg_;
@@ -230,6 +232,8 @@ class RovioNode{
     pubPatch_ = nh_.advertise<sensor_msgs::PointCloud2>("rovio/patch", 1);
     pubMarkers_ = nh_.advertise<visualization_msgs::Marker>("rovio/markers", 1 );
     pubPath_ = nh_.advertise<nav_msgs::Path>("rovio/path", 1);
+    pubTrackImg0_ = nh_.advertise<sensor_msgs::Image>("rovio/tracks/cam0", 1);
+    pubTrackImg1_ = nh_.advertise<sensor_msgs::Image>("rovio/tracks/cam1", 1);
 
     pub_T_J_W_transform = nh_.advertise<geometry_msgs::TransformStamped>("rovio/T_G_W", 1);
     for(int camID=0;camID<mtState::nCam_;camID++){
@@ -666,6 +670,32 @@ class RovioNode{
             cv::imshow("Tracker" + std::to_string(i), mpFilter_->safe_.img_[i]);
             cv::waitKey(3);
           }
+          // Convert the OpenCV image to a ROS sensor_msgs::Image message
+          if (i==0)
+          {
+            cv_bridge::CvImage img_bridge;
+            std_msgs::Header header;
+            header.seq = msgSeq_;
+            header.frame_id = world_frame_;
+            header.stamp = ros::Time(mpFilter_->safe_.t_);
+            img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::BGR8, mpFilter_->safe_.img_[i]);
+            sensor_msgs::Image img_msg;
+            img_bridge.toImageMsg(img_msg);
+            pubTrackImg0_.publish(img_msg);
+          }
+          if (i==1)
+          {
+            cv_bridge::CvImage img_bridge;
+            std_msgs::Header header;
+            header.seq = msgSeq_;
+            header.frame_id = world_frame_;
+            header.stamp = ros::Time(mpFilter_->safe_.t_);
+            img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::BGR8, mpFilter_->safe_.img_[i]);
+            sensor_msgs::Image img_msg;
+            img_bridge.toImageMsg(img_msg);
+            pubTrackImg1_.publish(img_msg);
+          }
+          
         }
         if(!mpFilter_->safe_.patchDrawing_.empty() && mpImgUpdate_->visualizePatches_){
           cv::imshow("Patches", mpFilter_->safe_.patchDrawing_);
