@@ -667,33 +667,34 @@ class RovioNode{
       if(mpFilter_->safe_.t_ > oldSafeTime){ // Publish only if something changed
         for(int i=0;i<mtState::nCam_;i++){
           if(!mpFilter_->safe_.img_[i].empty() && mpImgUpdate_->doFrameVisualisation_){
-            cv::imshow("Tracker" + std::to_string(i), mpFilter_->safe_.img_[i]);
-            cv::waitKey(3);
-          }
-          // Convert the OpenCV image to a ROS sensor_msgs::Image message
-          if (i==0)
-          {
-            cv_bridge::CvImage img_bridge;
-            std_msgs::Header header;
-            header.seq = msgSeq_;
-            header.frame_id = camera_frame_;
-            header.stamp = ros::Time(mpFilter_->safe_.t_);
+            // cv::imshow("Tracker" + std::to_string(i), mpFilter_->safe_.img_[i]);
+            // cv::waitKey(3);
+             // Convert the OpenCV image to a ROS sensor_msgs::Image message
+            if (i==0)
+            {
+              cv_bridge::CvImage img_bridge;
+              std_msgs::Header header;
+              header.seq = msgSeq_;
+              header.frame_id = camera_frame_;
+              header.stamp = ros::Time(mpFilter_->safe_.t_);
 
-            img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::RGB8, mpFilter_->safe_.img_[i]);
-            sensor_msgs::ImagePtr img_msg = img_bridge.toImageMsg();
-            pubTrackImg0_.publish(img_msg);
+              img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::RGB8, mpFilter_->safe_.img_[i]);
+              sensor_msgs::ImagePtr img_msg = img_bridge.toImageMsg();
+              pubTrackImg0_.publish(img_msg);
+            }
+            if (i==1)
+            {
+              cv_bridge::CvImage img_bridge;
+              std_msgs::Header header;
+              header.seq = msgSeq_;
+              header.frame_id = camera_frame_;
+              header.stamp = ros::Time(mpFilter_->safe_.t_);
+              img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::RGB8, mpFilter_->safe_.img_[i]);
+              sensor_msgs::ImagePtr img_msg = img_bridge.toImageMsg();
+              pubTrackImg1_.publish(img_msg);
+            }
           }
-          if (i==1)
-          {
-            cv_bridge::CvImage img_bridge;
-            std_msgs::Header header;
-            header.seq = msgSeq_;
-            header.frame_id = camera_frame_;
-            header.stamp = ros::Time(mpFilter_->safe_.t_);
-            img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::RGB8, mpFilter_->safe_.img_[i]);
-            sensor_msgs::ImagePtr img_msg = img_bridge.toImageMsg();
-            pubTrackImg1_.publish(img_msg);
-          }
+         
           
         }
         if(!mpFilter_->safe_.patchDrawing_.empty() && mpImgUpdate_->visualizePatches_){
