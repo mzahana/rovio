@@ -676,9 +676,10 @@ class RovioNode{
             cv_bridge::CvImage img_bridge;
             std_msgs::Header header;
             header.seq = msgSeq_;
-            header.frame_id = world_frame_;
+            header.frame_id = camera_frame_;
             header.stamp = ros::Time(mpFilter_->safe_.t_);
-            img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::BGR8, mpFilter_->safe_.img_[i]);
+
+            img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::MONO8, mpFilter_->safe_.img_[i]);
             sensor_msgs::Image img_msg;
             img_bridge.toImageMsg(img_msg);
             pubTrackImg0_.publish(img_msg);
@@ -690,7 +691,7 @@ class RovioNode{
             header.seq = msgSeq_;
             header.frame_id = world_frame_;
             header.stamp = ros::Time(mpFilter_->safe_.t_);
-            img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::BGR8, mpFilter_->safe_.img_[i]);
+            img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::MONO8, mpFilter_->safe_.img_[i]);
             sensor_msgs::Image img_msg;
             img_bridge.toImageMsg(img_msg);
             pubTrackImg1_.publish(img_msg);
