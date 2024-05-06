@@ -851,6 +851,7 @@ class RovioNode{
           imuOutputCT_.transformCovMat(state,cov,imuOutputCov_);
 
           estimatedPoseWithCovarianceStampedMsg_.header.seq = msgSeq_;
+          estimatedPoseWithCovarianceStampedMsg_.header.frame_id = world_frame_;
           estimatedPoseWithCovarianceStampedMsg_.header.stamp = ros::Time(mpFilter_->safe_.t_);
           estimatedPoseWithCovarianceStampedMsg_.pose.pose.position.x = imuOutput_.WrWB()(0);
           estimatedPoseWithCovarianceStampedMsg_.pose.pose.position.y = imuOutput_.WrWB()(1);
