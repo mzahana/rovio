@@ -57,6 +57,7 @@
 #include "rovio/CoordinateTransform/FeatureOutputReadable.hpp"
 #include "rovio/CoordinateTransform/YprOutput.hpp"
 #include "rovio/CoordinateTransform/LandmarkOutput.hpp"
+#include "rovio/HealthMonitor.hpp"
 
 namespace rovio {
 
@@ -165,6 +166,9 @@ class RovioNode{
   nav_msgs::Path pathMsg_;
   int msgSeq_;
 
+  // Utilities
+  RovioHealthMonitor healthMonitor_;
+
   // Rovio outputs and coordinate transformations
   typedef StandardOutput mtOutput;
   mtOutput cameraOutput_;
@@ -192,7 +196,7 @@ class RovioNode{
   /** \brief Constructor
    */
   RovioNode(ros::NodeHandle& nh, ros::NodeHandle& nh_private, std::shared_ptr<mtFilter> mpFilter)
-      : nh_(nh), nh_private_(nh_private), mpFilter_(mpFilter), transformFeatureOutputCT_(&mpFilter->multiCamera_), landmarkOutputImuCT_(&mpFilter->multiCamera_),
+      : nh_(nh), nh_private_(nh_private), mpFilter_(mpFilter), healthMonitor_(nh, nh_private), transformFeatureOutputCT_(&mpFilter->multiCamera_), landmarkOutputImuCT_(&mpFilter->multiCamera_),
         cameraOutputCov_((int)(mtOutput::D_),(int)(mtOutput::D_)), featureOutputCov_((int)(FeatureOutput::D_),(int)(FeatureOutput::D_)), landmarkOutputCov_(3,3),
         featureOutputReadableCov_((int)(FeatureOutputReadable::D_),(int)(FeatureOutputReadable::D_)){
     #ifndef NDEBUG
@@ -520,6 +524,38 @@ class RovioNode{
     }
     cv::Mat cv_img;
     cv_ptr->image.copyTo(cv_img);
+
+    constexpr bool histogram_equalize = false;
+    if (histogram_equalize) {
+      constexpr size_t hist_bins = 256;
+      cv::Mat hist;
+      std::vector<cv::Mat> img_vec = {cv_img};
+      cv::calcHist(img_vec, {0}, cv::Mat(), hist, {hist_bins},
+                   {0, hist_bins-1}, false);
+
+      cv::Mat lut(1, hist_bins, CV_8UC1);
+
+      double sum = 0.0;
+      //prevents an image full of noise if in total darkness
+      float max_per_bin = cv_img.cols * cv_img.rows * 0.02;
+      float min_per_bin = cv_img.cols * cv_img.rows * 0.002;
+      float total_pixels = 0;
+      for(size_t i = 0; i < hist_bins; ++i){
+        float& bin = hist.at<float>(i);
+        if(bin > max_per_bin){
+          bin = max_per_bin;
+        } else if(bin < min_per_bin){
+          bin = min_per_bin;
+        }
+        total_pixels += bin;
+      }
+      for(size_t i = 0; i < hist_bins; ++i){
+        sum += hist.at<float>(i) / total_pixels;
+        lut.at<uchar>(i) = (hist_bins-1)*sum;
+      }
+      cv::LUT(cv_img, lut, cv_img);
+    }
+
     if(init_state_.isInitialized() && !cv_img.empty()){
       double msgTime = img->header.stamp.toSec();
       if(msgTime != imgUpdateMeas_.template get<mtImgMeas::_aux>().imgTime_){
@@ -692,7 +728,7 @@ class RovioNode{
 
         // Obtain the save filter state.
         mtFilterState& filterState = mpFilter_->safe_;
-	      mtState& state = mpFilter_->safe_.state_;
+        mtState& state = mpFilter_->safe_.state_;
         state.updateMultiCameraExtrinsics(&mpFilter_->multiCamera_);
         MXD& cov = mpFilter_->safe_.cov_;
         imuOutputCT_.transformState(state,imuOutput_);
@@ -917,6 +953,8 @@ class RovioNode{
           pubImuBias_.publish(imuBiasMsg_);
         }
 
+        std::vector<float> featureDistanceCov;
+
         // PointCloud message.
         if(pubPcl_.getNumSubscribers() > 0 || pubMarkers_.getNumSubscribers() > 0 || forcePclPublishing_ || forceMarkersPublishing_){
           pclMsg_.header.seq = msgSeq_;
@@ -958,6 +996,8 @@ class RovioNode{
               transformFeatureOutputCT_.transformCovMat(state,cov,featureOutputCov_);
               featureOutputReadableCT_.transformState(featureOutput_,featureOutputReadable_);
               featureOutputReadableCT_.transformCovMat(featureOutput_,featureOutputCov_,featureOutputReadableCov_);
+
+              featureDistanceCov.push_back(static_cast<float>(featureOutputReadableCov_(3, 3)));
 
               // Get landmark output
               landmarkOutputImuCT_.setFeatureID(i);
@@ -1054,6 +1094,45 @@ class RovioNode{
           pubPatch_.publish(patchMsg_);
         }
         gotFirstMessages_ = true;
+
+        // Perform health check, if needed.
+        if (healthMonitor_.enabled()) {
+          // FeatureDistanceCov is only filled in if pointcloud output is active
+          // by default.
+          if (featureDistanceCov.empty()) {
+            for (unsigned int i = 0; i < mtState::nMax_; i++) {
+              if (filterState.fsm_.isValid_[i]) {
+                transformFeatureOutputCT_.setFeatureID(i);
+                transformFeatureOutputCT_.setOutputCameraID(
+                    filterState.fsm_.features_[i].mpCoordinates_->camID_);
+                transformFeatureOutputCT_.transformState(state, featureOutput_);
+                transformFeatureOutputCT_.transformCovMat(state, cov,
+                                                          featureOutputCov_);
+                featureOutputReadableCT_.transformState(featureOutput_,
+                                                        featureOutputReadable_);
+                featureOutputReadableCT_.transformCovMat(
+                    featureOutput_, featureOutputCov_,
+                    featureOutputReadableCov_);
+
+                featureDistanceCov.push_back(
+                    static_cast<float>(featureOutputReadableCov_(3, 3)));
+              }
+            }
+          }
+          if (healthMonitor_.shouldResetEstimator(featureDistanceCov,
+                                                  imuOutput_)) {
+            if (!init_state_.isInitialized()) {
+              std::cout << "Reinitialization already triggered. Ignoring "
+                           "request...";
+              return;
+            }
+
+            init_state_.WrWM_ = healthMonitor_.failsafe_WrWB();
+            init_state_.qMW_ = healthMonitor_.failsafe_qBW();
+            init_state_.state_ =
+                FilterInitializationState::State::WaitForInitExternalPose;
+          }
+        }
       }
     }
   }
