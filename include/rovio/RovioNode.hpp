@@ -150,8 +150,7 @@ class RovioNode{
   ros::Publisher pubExtrinsics_[mtState::nCam_];
   ros::Publisher pubImuBias_;
   ros::Publisher pubPath_;
-  ros::Publisher pubTrackImg0_; // for cam0
-  ros::Publisher pubTrackImg1_; // for cam1
+  ros::Publisher pubTrackImg_[mtState::nCam_]; /**<Publishers: ROS iamges for tracks.*/
 
   // Ros Messages
   geometry_msgs::TransformStamped transformMsg_;
@@ -232,14 +231,15 @@ class RovioNode{
     pubPatch_ = nh_.advertise<sensor_msgs::PointCloud2>("rovio/patch", 1);
     pubMarkers_ = nh_.advertise<visualization_msgs::Marker>("rovio/markers", 1 );
     pubPath_ = nh_.advertise<nav_msgs::Path>("rovio/path", 1);
-    pubTrackImg0_ = nh_.advertise<sensor_msgs::Image>("rovio/tracks/cam0", 1);
-    pubTrackImg1_ = nh_.advertise<sensor_msgs::Image>("rovio/tracks/cam1", 1);
-
     pub_T_J_W_transform = nh_.advertise<geometry_msgs::TransformStamped>("rovio/T_G_W", 1);
     for(int camID=0;camID<mtState::nCam_;camID++){
       pubExtrinsics_[camID] = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("rovio/extrinsics" + std::to_string(camID), 1 );
     }
     pubImuBias_ = nh_.advertise<sensor_msgs::Imu>("rovio/imu_biases", 1 );
+
+    for(int camID=0;camID<mtState::nCam_;camID++){
+      pubTrackImg_[camID] = nh_.advertise<sensor_msgs::Image>("rovio/track" + std::to_string(camID), 1 );
+    }
 
     // Handle coordinate frame naming
     map_frame_ = "map";
@@ -670,28 +670,16 @@ class RovioNode{
             // cv::imshow("Tracker" + std::to_string(i), mpFilter_->safe_.img_[i]);
             // cv::waitKey(3);
              // Convert the OpenCV image to a ROS sensor_msgs::Image message
-            if (i==0)
-            {
+            if(pubTrackImg_[i].getNumSubscribers() > 0){
               cv_bridge::CvImage img_bridge;
               std_msgs::Header header;
               header.seq = msgSeq_;
-              header.frame_id = camera_frame_;
+              header.frame_id = camera_frame_ + std::to_string(i);;
               header.stamp = ros::Time(mpFilter_->safe_.t_);
 
               img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::RGB8, mpFilter_->safe_.img_[i]);
               sensor_msgs::ImagePtr img_msg = img_bridge.toImageMsg();
-              pubTrackImg0_.publish(img_msg);
-            }
-            if (i==1)
-            {
-              cv_bridge::CvImage img_bridge;
-              std_msgs::Header header;
-              header.seq = msgSeq_;
-              header.frame_id = camera_frame_;
-              header.stamp = ros::Time(mpFilter_->safe_.t_);
-              img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::RGB8, mpFilter_->safe_.img_[i]);
-              sensor_msgs::ImagePtr img_msg = img_bridge.toImageMsg();
-              pubTrackImg1_.publish(img_msg);
+              pubTrackImg_[i].publish(img_msg);
             }
           }
          
